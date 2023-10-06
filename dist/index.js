@@ -7,16 +7,16 @@ const express_1 = __importDefault(require("express"));
 const cors_1 = __importDefault(require("cors"));
 const http_1 = __importDefault(require("http"));
 const app = (0, express_1.default)();
-app.use((0, cors_1.default)());
+app.use(express_1.default.json());
 app.use((0, cors_1.default)({
-    origin: 'http://192.168.10.10:3000',
+    origin: 'http://192.168.11.145:3000',
     methods: ['GET', 'POST'],
     allowedHeaders: ['Content-Type'],
 }));
 const server = http_1.default.createServer(app);
 const io = require('socket.io')(server, {
     cors: {
-        origin: 'http://192.168.10.10:3000',
+        origin: 'http://192.168.11.145:3000',
     },
 });
 var Events;
@@ -33,6 +33,7 @@ var Events;
     Events["resetScores"] = "resetScores";
     Events["showWinnerAlert"] = "showWinnerAlert";
     Events["checkLetter"] = "checkLetter";
+    Events["resetLetters"] = "resetLetters";
 })(Events || (Events = {}));
 const users = new Map();
 const userRooms = new Map();
@@ -89,7 +90,7 @@ io.on(Events.userConnect, (socket) => {
         users.set(socket.id, user);
         io.to(roomName).emit(Events.updateUserList, Array.from(users.values()).filter(user => user.roomName === roomName));
         gameStarted = true;
-        io.emit(Events.setGameStatus, gameStarted);
+        socket.emit(Events.setGameStatus, gameStarted);
         giveNextLetterToUser(socket, roomName);
         socket.emit(Events.setRoomGame, roomName);
     });
@@ -122,20 +123,23 @@ io.on(Events.userConnect, (socket) => {
                             user.letterQueue = [];
                         }
                     });
-                    setTimeout(() => {
+                    socket.on(Events.resetScores, (roomName) => {
+                        const letters = [];
+                        for (let i = 0; i < winningScore; i++) {
+                            letters.push(getRandomLetter());
+                        }
+                        roomLetters.set(roomName, letters);
                         users.forEach((user) => {
                             if (user.roomName === roomName) {
                                 user.score = 0;
                                 user.currentIndex = 0;
+                                user.letterQueue = [];
                                 giveNextLetterToUser(socket, roomName);
                             }
                         });
                         winningUserId = null;
-                        io.to(roomName).emit(Events.resetScores);
-                        if (roomName != null) {
-                            giveNextLetterToUser(socket, roomName);
-                        }
-                    }, 5000);
+                        io.to(roomName).emit(Events.resetLetters, letters);
+                    });
                 }
                 else {
                     if (user.letterQueue.length > 0) {

@@ -1,15 +1,15 @@
-import express, {Express} from 'express';
+import express, { Express } from 'express';
 import cors from 'cors';
 import http from 'http';
-import {Socket} from 'socket.io';
+import { Socket } from 'socket.io';
 
 const app: Express = express();
 
-app.use(cors());
+app.use(express.json());
 
 app.use(
     cors({
-        origin: 'http://192.168.10.10:3000',
+        origin: 'http://192.168.11.145:3000',
         methods: ['GET', 'POST'],
         allowedHeaders: ['Content-Type'],
     })
@@ -19,7 +19,7 @@ const server = http.createServer(app);
 
 const io = require('socket.io')(server, {
     cors: {
-        origin: 'http://192.168.10.10:3000',
+        origin: 'http://192.168.11.145:3000',
     },
 });
 
@@ -36,6 +36,7 @@ enum Events {
     resetScores = 'resetScores',
     showWinnerAlert = 'showWinnerAlert',
     checkLetter = 'checkLetter',
+    resetLetters = 'resetLetters',
 }
 
 const users = new Map();
@@ -57,7 +58,7 @@ const generateRoomId = () => {
     const oneCharNowMilliseconds = Date.now().toString().slice(-1);
     const nowMilliseconds = Date.now().toString().slice(-6);
 
-    return `R${oneCharNowMilliseconds+nowMilliseconds}`;
+    return `R${oneCharNowMilliseconds + nowMilliseconds}`;
 };
 
 const giveNextLetterToUser = (socket: Socket, roomName: string) => {
@@ -113,7 +114,7 @@ io.on(Events.userConnect, (socket: Socket) => {
         io.to(roomName).emit(Events.updateUserList, Array.from(users.values()).filter(user => user.roomName === roomName));
 
         gameStarted = true;
-        io.emit(Events.setGameStatus, gameStarted);
+        socket.emit(Events.setGameStatus, gameStarted);
 
         giveNextLetterToUser(socket, roomName);
 
@@ -158,22 +159,28 @@ io.on(Events.userConnect, (socket: Socket) => {
                         }
                     });
 
-                    setTimeout(() => {
+                    socket.on(Events.resetScores, (roomName: string) => {
+                        const letters: string[] = [];
+
+                        for (let i = 0; i < winningScore; i++) {
+                            letters.push(getRandomLetter());
+                        }
+
+                        roomLetters.set(roomName, letters);
+
                         users.forEach((user) => {
                             if (user.roomName === roomName) {
                                 user.score = 0;
                                 user.currentIndex = 0;
+                                user.letterQueue = [];
                                 giveNextLetterToUser(socket, roomName);
                             }
                         });
 
                         winningUserId = null;
-                        io.to(roomName).emit(Events.resetScores);
 
-                        if (roomName != null) {
-                            giveNextLetterToUser(socket, roomName);
-                        }
-                    }, 5000);
+                        io.to(roomName).emit(Events.resetLetters, letters);
+                    });
                 } else {
                     if (user.letterQueue.length > 0) {
                         socket.emit(
@@ -190,6 +197,8 @@ io.on(Events.userConnect, (socket: Socket) => {
             }
         }
     });
+
+
 
 });
 
