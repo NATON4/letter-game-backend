@@ -34,6 +34,8 @@ var Events;
     Events["showWinnerAlert"] = "showWinnerAlert";
     Events["checkLetter"] = "checkLetter";
     Events["resetLetters"] = "resetLetters";
+    Events["resetGame"] = "resetGame";
+    Events["joinRoom"] = "joinRoom";
 })(Events || (Events = {}));
 const users = new Map();
 const userRooms = new Map();
@@ -41,6 +43,7 @@ const roomLetters = new Map();
 let winningUserId = null;
 let gameStarted = false;
 let userNicknames = [];
+let winningScore = 20; // Початкове значення
 const getRandomLetter = () => {
     const alphabet = 'abcdefghiklmnopqrstuvwxyz1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ';
     const randomIndex = Math.floor(Math.random() * alphabet.length);
@@ -54,8 +57,7 @@ const generateRoomId = () => {
 const giveNextLetterToUser = (socket, roomName) => {
     const user = users.get(socket.id);
     const letters = roomLetters.get(roomName);
-    //console.log(roomLetters);
-    if (user && letters && letters.length > 0) {
+    if (letters) {
         const currentIndex = user.currentIndex || 0;
         const nextIndex = currentIndex % letters.length;
         const nextLetter = letters[nextIndex];
@@ -68,7 +70,6 @@ const giveNextLetterToUser = (socket, roomName) => {
 io.on(Events.userConnect, (socket) => {
     console.log(`Client ${socket.id} connected`);
     gameStarted = false;
-    let winningScore = 20;
     socket.on(Events.startGame, (nickname, roomName) => {
         if (!roomName) {
             roomName = generateRoomId();
@@ -96,12 +97,48 @@ io.on(Events.userConnect, (socket) => {
     });
     socket.emit(Events.setUserScore, users.has(socket.id) ? users.get(socket.id).score : 0);
     socket.emit(Events.setGameStatus, gameStarted);
+    const resetGame = (roomName) => {
+        io.to(roomName).emit(Events.resetGame);
+    };
+    socket.on(Events.resetScores, (roomName) => {
+        console.log('-----------');
+        const letters = [];
+        for (let i = 0; i < winningScore; i++) {
+            letters.push(getRandomLetter());
+        }
+        roomLetters.set(roomName, letters);
+        users.forEach((user) => {
+            if (user.roomName === roomName) {
+                user.score = 0;
+                user.currentIndex = 0;
+                user.letterQueue = letters;
+                giveNextLetterToUser(socket, roomName);
+            }
+        });
+        winningUserId = null;
+        io.to(roomName).emit(Events.resetLetters, letters);
+        resetGame(roomName);
+    });
+    socket.on(Events.joinRoom, (roomName) => {
+        if (roomName) {
+            socket.join(roomName);
+            userRooms.set(socket.id, roomName);
+            const user = users.get(socket.id);
+            socket.emit(Events.updateScoreToWin, winningScore);
+            user.score = 0;
+            user.letterQueue = [];
+            user.currentIndex = 0;
+            io.to(roomName).emit(Events.updateUserList, Array.from(users.values()).filter(user => user.roomName === roomName));
+            gameStarted = true;
+            socket.emit(Events.setGameStatus, gameStarted);
+            giveNextLetterToUser(socket, roomName);
+            socket.emit(Events.setRoomGame, roomName);
+        }
+    });
     socket.on(Events.checkLetter, (eventKey) => {
         const roomName = userRooms.get(socket.id);
         const user = users.get(socket.id);
-        if (user && user.letterQueue && user.letterQueue.length > 0) {
-            console.log(eventKey + ' ' + user.letterQueue[0]);
-            console.log("Queue is: " + user.letterQueue);
+        if (user && user.letterQueue) {
             if (user.score >= winningScore) {
                 return;
             }
@@ -113,33 +150,6 @@ io.on(Events.userConnect, (socket) => {
                 if (user.score >= winningScore) {
                     winningUserId = socket.id;
                     io.to(roomName).emit(Events.showWinnerAlert, user.nickname);
-                    const letters = [];
-                    for (let i = 0; i < winningScore; i++) {
-                        letters.push(getRandomLetter());
-                    }
-                    roomLetters.set(roomName, letters);
-                    users.forEach((user) => {
-                        if (user.roomName === roomName) {
-                            user.letterQueue = [];
-                        }
-                    });
-                    socket.on(Events.resetScores, (roomName) => {
-                        const letters = [];
-                        for (let i = 0; i < winningScore; i++) {
-                            letters.push(getRandomLetter());
-                        }
-                        roomLetters.set(roomName, letters);
-                        users.forEach((user) => {
-                            if (user.roomName === roomName) {
-                                user.score = 0;
-                                user.currentIndex = 0;
-                                user.letterQueue = [];
-                                giveNextLetterToUser(socket, roomName);
-                            }
-                        });
-                        winningUserId = null;
-                        io.to(roomName).emit(Events.resetLetters, letters);
-                    });
                 }
                 else {
                     if (user.letterQueue.length > 0) {
@@ -147,6 +157,17 @@ io.on(Events.userConnect, (socket) => {
                     }
                 }
                 io.to(roomName).emit(Events.updateUserList, Array.from(users.values()).filter(user => user.roomName === roomName));
+            }
+        }
+    });
+    socket.on(Events.userDisconnect, () => {
+        const roomName = userRooms.get(socket.id);
+        userRooms.delete(socket.id);
+        users.delete(socket.id);
+        if (roomName) {
+            io.to(roomName).emit(Events.updateUserList, Array.from(users.values()).filter(user => user.roomName === roomName));
+            if (users.size === 0) {
+                roomLetters.delete(roomName);
             }
         }
     });
